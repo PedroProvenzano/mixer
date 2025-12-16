@@ -79,6 +79,7 @@ function createGroupCard(group) {
 
     const tracksInGroup = TRACKS.filter(t => t.groupId === group.id);
     const hasAudioTracks = tracksInGroup.some(t => t.enabled && t.file);
+    const groupVolume = group.volume !== undefined ? group.volume : 100;
 
     card.innerHTML = `
         <div class="group-header">
@@ -114,6 +115,18 @@ function createGroupCard(group) {
                 </button>
             </div>
         </div>
+        ${hasAudioTracks ? `
+            <div class="volume-control group-volume">
+                <div class="volume-header">
+                    <label for="${group.id}-volume">Group Volume</label>
+                    <span class="volume-value" id="${group.id}-value">${groupVolume}%</span>
+                </div>
+                <input type="range" id="${group.id}-volume" class="volume-slider" min="0" max="100" value="${groupVolume}">
+                <div class="volume-bar">
+                    <div class="volume-fill" id="${group.id}-fill" style="width: ${groupVolume}%"></div>
+                </div>
+            </div>
+        ` : ''}
         <div class="group-tracks ${tracksInGroup.length === 0 ? 'empty' : ''}" data-group="${group.id}">
             ${tracksInGroup.length === 0 ? 'No tracks assigned' : ''}
         </div>
@@ -169,6 +182,12 @@ function attachGroupEventListeners(card, group) {
         });
     }
 
+    // Volume control
+    const volumeSlider = card.querySelector(`#${group.id}-volume`);
+    if (volumeSlider) {
+        volumeSlider.addEventListener('input', (e) => handleGroupVolume(group.id, e.target.value));
+    }
+
     // Control buttons
     const playBtn = card.querySelector('.group-play-btn');
     if (playBtn) playBtn.addEventListener('click', () => toggleGroupPlay(group.id));
@@ -198,7 +217,8 @@ function addNewGroup() {
         name: `Group ${state.groupCounter}`,
         icon: '📁',
         muted: false,
-        playing: false
+        playing: false,
+        volume: 100
     };
 
     GROUPS.push(newGroup);
@@ -1073,12 +1093,38 @@ function handleTrackVolume(trackId, value) {
     document.getElementById(`${trackId}-fill`).style.width = `${value}%`;
 
     if (state.audioElements[trackId]) {
+        const track = TRACKS.find(t => t.id === trackId);
+        const group = track?.groupId ? GROUPS.find(g => g.id === track.groupId) : null;
+        const groupVol = group?.volume !== undefined ? group.volume / 100 : 1;
+
         const masterVol = state.masterVolume / 100;
         const trackVol = state.tracks[trackId].volume / 100;
-        state.audioElements[trackId].volume = masterVol * trackVol;
+        state.audioElements[trackId].volume = masterVol * trackVol * groupVol;
     }
 
     saveState();
+}
+
+function handleGroupVolume(groupId, value) {
+    const group = GROUPS.find(g => g.id === groupId);
+    if (!group) return;
+
+    group.volume = parseInt(value);
+    document.getElementById(`${groupId}-value`).textContent = `${value}%`;
+    document.getElementById(`${groupId}-fill`).style.width = `${value}%`;
+
+    // Update all tracks in this group
+    const tracksInGroup = TRACKS.filter(t => t.groupId === groupId && t.enabled && t.file);
+    tracksInGroup.forEach(track => {
+        if (state.audioElements[track.id]) {
+            const masterVol = state.masterVolume / 100;
+            const trackVol = state.tracks[track.id].volume / 100;
+            const groupVol = group.volume / 100;
+            state.audioElements[track.id].volume = masterVol * trackVol * groupVol;
+        }
+    });
+
+    saveCustomData();
 }
 
 function toggleTrackMute(trackId) {
@@ -1122,9 +1168,13 @@ function toggleTrackMute(trackId) {
 
 function updateAllTrackVolumes() {
     Object.entries(state.audioElements).forEach(([trackId, audio]) => {
+        const track = TRACKS.find(t => t.id === trackId);
+        const group = track?.groupId ? GROUPS.find(g => g.id === track.groupId) : null;
+        const groupVol = group?.volume !== undefined ? group.volume / 100 : 1;
+
         const masterVol = state.masterVolume / 100;
         const trackVol = state.tracks[trackId].volume / 100;
-        audio.volume = masterVol * trackVol;
+        audio.volume = masterVol * trackVol * groupVol;
     });
 }
 
@@ -1260,7 +1310,15 @@ function loadCustomData() {
             }
 
             if (customData.tracks?.counter) state.trackCounter = customData.tracks.counter;
-            if (customData.groups?.all) GROUPS = customData.groups.all;
+            if (customData.groups?.all) {
+                GROUPS = customData.groups.all;
+                // Ensure all groups have a volume property (backward compatibility)
+                GROUPS.forEach(group => {
+                    if (group.volume === undefined) {
+                        group.volume = 100;
+                    }
+                });
+            }
             if (customData.groups?.counter) state.groupCounter = customData.groups.counter;
         } catch (err) {
             console.error('Error loading custom data:', err);

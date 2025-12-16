@@ -1209,6 +1209,13 @@ body {
     height: 0.875rem;
 }
 
+/* Group Volume Control */
+
+.group-volume {
+    margin-top: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
 /* Group Tracks Display */
 
 .group-tracks {
